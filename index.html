@@ -24,7 +24,7 @@
     rel="stylesheet"
   />
 
-  <link rel="stylesheet" href="styles.css?v=2.4.9" />
+  <link rel="stylesheet" href="styles.css?v=2.5.0" />
 </head>
 <body>
 
@@ -342,6 +342,19 @@ so inaccuracies may occur depending on the environment.</div>
         <div id="session-map-empty" class="analysis-map-empty hidden">GPS データなし</div>
       </div>
 
+      <!-- 再生シミュレーション（音楽プレイヤー風） -->
+      <div class="playback-bar" id="playback-bar">
+        <div class="pb-controls">
+          <button id="pb-play" class="pb-btn pb-main" title="再生/一時停止">▶</button>
+          <button id="pb-stop" class="pb-btn" title="停止">■</button>
+          <input type="range" id="pb-seek" class="pb-seek" min="0" max="1000" step="1" value="0" />
+          <span class="pb-time"><span id="pb-cur">0:00.0</span><span class="pb-sep">/</span><span id="pb-total">0:00.0</span></span>
+          <button id="pb-speed" class="pb-btn pb-speed" title="再生速度">×1</button>
+          <button id="pb-ghost" class="pb-btn pb-ghost" title="ベスト記録と比較">BEST</button>
+        </div>
+        <div class="pb-info" id="pb-info"></div>
+      </div>
+
       <!-- メトリック選択 -->
       <div class="analysis-controls">
         <div class="control-row">
@@ -592,6 +605,6 @@ so inaccuracies may occur depending on the environment.</div>
     crossorigin=""
   ></script>
 
-  <script src="app.js?v=2.4.9"></script>
+  <script src="app.js?v=2.5.0"></script>
 </body>
 </html>

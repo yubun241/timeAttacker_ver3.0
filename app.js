@@ -1080,6 +1080,9 @@ window.addEventListener('error', function(e) {
     renderLapChips(s);
     renderSessionLapList(s);
 
+    // 再生シミュレーションを初期化（マップ生成後に drawAnalysis 経由で再構築される）
+    resetPlaybackForSession();
+
     showScreen('session');
     // マップは画面表示後にサイズ計算する必要あり
     setTimeout(() => { initSessionMap(s); drawTimeSeriesGraph(s); }, 50);
@@ -1227,16 +1230,28 @@ window.addEventListener('error', function(e) {
 
     const laps = (analysis.selectedLaps.length > 0) ? analysis.selectedLaps : [-1];
 
+    // 各シリーズ: vals(値) + times(スタートからの経過秒)。経過時間はシリーズ先頭を 0 とする
+    const buildSeries = (sess, lapNum) => {
+      const pts = extractLapPoints(sess, lapNum, metricDef.col, analysis.selectedSector);
+      let t0 = null;
+      const vals = [], times = [];
+      pts.forEach(p => {
+        const tv = (p.t != null && isFinite(p.t)) ? p.t : null;
+        if (t0 === null && tv != null) t0 = tv;
+        times.push((tv != null && t0 != null) ? (tv - t0) / 1000 : null);
+        vals.push((p.v == null || !isFinite(p.v)) ? null : (metricDef.abs ? Math.abs(p.v) : p.v));
+      });
+      return { vals, times };
+    };
+
     const series = [];
     let vMin = Infinity, vMax = -Infinity;
+    let tMaxAll = 0;
     laps.forEach(lapNum => {
-      const pts = extractLapPoints(s, lapNum, metricDef.col, analysis.selectedSector);
-      const vals = pts.map(p => {
-        if (p.v == null || !isFinite(p.v)) return null;
-        return metricDef.abs ? Math.abs(p.v) : p.v;
-      });
+      const { vals, times } = buildSeries(s, lapNum);
       vals.forEach(v => { if (v != null) { if (v < vMin) vMin = v; if (v > vMax) vMax = v; } });
-      series.push({ color: LAP_COLORS[(lapNum === -1 ? 1 : (lapNum - 1)) % LAP_COLORS.length], vals });
+      times.forEach(t => { if (t != null && t > tMaxAll) tMaxAll = t; });
+      series.push({ color: LAP_COLORS[(lapNum === -1 ? 1 : (lapNum - 1)) % LAP_COLORS.length], vals, times });
     });
 
     // 比較走行（同コースの別走行）を折れ線で重ねる
@@ -1250,13 +1265,10 @@ window.addEventListener('error', function(e) {
         if (!cmp) return;
         const ci = sameCourse.findIndex(x => x.id === cmpId);
         const color = LAP_COLORS[(ci + 3) % LAP_COLORS.length];
-        const pts = extractLapPoints(cmp, -1, metricDef.col, analysis.selectedSector);
-        const vals = pts.map(p => {
-          if (p.v == null || !isFinite(p.v)) return null;
-          return metricDef.abs ? Math.abs(p.v) : p.v;
-        });
+        const { vals, times } = buildSeries(cmp, -1);
         vals.forEach(v => { if (v != null) { if (v < vMin) vMin = v; if (v > vMax) vMax = v; } });
-        series.push({ color, vals, dashed: true });
+        times.forEach(t => { if (t != null && t > tMaxAll) tMaxAll = t; });
+        series.push({ color, vals, times, dashed: true });
       });
     }
 
@@ -1291,23 +1303,63 @@ window.addEventListener('error', function(e) {
     ctx.fillStyle = '#7a8499';
     ctx.fillText(metricDef.unit, 2, 2);
 
-    series.forEach(({ color, vals }) => {
+    // ── X 軸（スタートからの経過時間）────────────────
+    const hasTime = tMaxAll > 0;
+    const fmtElapsed = (sec) => {
+      if (tMaxAll >= 60) {
+        const m = Math.floor(sec / 60);
+        const ss = Math.round(sec % 60);
+        return `${m}:${String(ss).padStart(2, '0')}`;
+      }
+      return (sec % 1 === 0 ? sec.toFixed(0) : sec.toFixed(1)) + 's';
+    };
+    if (hasTime) {
+      // 目盛り間隔: 約 4〜6 本になる「キリの良い」秒数を選択
+      const NICE = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200];
+      let step = NICE[NICE.length - 1];
+      for (const st of NICE) { if (tMaxAll / st <= 6) { step = st; break; } }
+      ctx.strokeStyle = '#1c2230';
+      ctx.fillStyle = '#5a6472';
+      ctx.font = '10px "IBM Plex Mono",monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      for (let t = 0; t <= tMaxAll + 1e-6; t += step) {
+        const x = padL + plotW * (t / tMaxAll);
+        if (x > W - padR + 1) break;
+        ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke();
+        // 端のラベルがはみ出さないよう揃えを調整
+        ctx.textAlign = (t === 0) ? 'left' : ((tMaxAll - t) < step * 0.5 ? 'right' : 'center');
+        ctx.fillText(fmtElapsed(t), x, padT + plotH + 4);
+      }
+      // 軸ラベル
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#7a8499';
+      ctx.fillText('TIME', W - padR, 2);
+    }
+
+    series.forEach(({ color, vals, times, dashed }) => {
       const n = vals.length;
       if (n < 2) return;
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
+      ctx.setLineDash(dashed ? [6, 4] : []);
       ctx.beginPath();
       let started = false;
       vals.forEach((v, i) => {
         if (v == null) { started = false; return; }
-        const x = padL + (plotW * i / (n - 1));
+        // 経過時間が取れる場合は時間軸、無い場合はインデックス軸にフォールバック
+        const tv = times ? times[i] : null;
+        const x = (hasTime && tv != null)
+          ? padL + plotW * (tv / tMaxAll)
+          : padL + (plotW * i / (n - 1));
         const y = padT + plotH * (1 - (v - vMin) / vSpan);
         if (!started) { ctx.moveTo(x, y); started = true; }
         else ctx.lineTo(x, y);
       });
       ctx.stroke();
+      ctx.setLineDash([]);
     });
   }
 
@@ -1473,6 +1525,10 @@ window.addEventListener('error', function(e) {
         }
       });
     }
+
+    // ── 再生シミュレーションのトラック・ドットを再構築 ──
+    // (マップ再生成・ラップ/区間/指標チップ変更のすべてがここを通る)
+    rebuildPlayback(s);
   }
 
   // ライン取りモード用の凡例（走行の色対応を表示）
@@ -1513,7 +1569,9 @@ window.addEventListener('error', function(e) {
         const rawV = r[metricCol];
         v = (rawV === '' || rawV == null) ? null : parseFloat(rawV);
       }
-      pts.push({ lat, lon, v });
+      // タイムスタンプ (r[0] = ISO 文字列) — 時間軸グラフ & 再生シミュレーション用
+      const t = Date.parse(r[0]);
+      pts.push({ lat, lon, v, t: isFinite(t) ? t : null });
     }
     return pts;
   }
@@ -1601,6 +1659,304 @@ window.addEventListener('error', function(e) {
     analysis.layers.push(line);
   }
 
+  // ============================================================
+  // PLAYBACK SIMULATION (走行再生シミュレーション)
+  //   ・選択中ラップの軌跡を、記録タイムスタンプに忠実な速度でドット再生
+  //   ・音楽プレイヤー風 UI: 再生/一時停止・停止・シークバー・再生速度
+  //   ・BEST トグルで「同コースのベスト記録」をゴーストドットとして同時再生
+  // ============================================================
+  const playback = {
+    track: [],        // メイン走行 [{lat,lon,t(相対ms),v(km/h)}]
+    ghostTrack: [],   // ベスト記録 (ゴースト)
+    ghostInfo: null,  // {totalMs, dateLabel, lapNumber, isSelf}
+    duration: 0,      // 再生総時間 ms
+    simTime: 0,       // 現在の再生位置 ms
+    playing: false,
+    speed: 1,
+    speedSteps: [1, 2, 4, 8, 0.5],
+    ghostOn: false,
+    marker: null,
+    ghostMarker: null,
+    raf: null,
+    lastTs: 0,
+    mainLapNum: -1,
+    seeking: false,   // シークバーをドラッグ中（rAF によるバー上書きを抑止）
+  };
+
+  // 経過時間 ms → "m:ss.d" 表示
+  function fmtPlayClock(ms) {
+    if (!isFinite(ms) || ms < 0) ms = 0;
+    const totalSec = ms / 1000;
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec - m * 60;
+    return `${m}:${s.toFixed(1).padStart(4, '0')}`;
+  }
+
+  // セッション + ラップ番号 → 再生トラック（先頭を t=0 に正規化）
+  function buildTrackPoints(sess, lapNum, sectorFilter) {
+    const pts = extractLapPoints(sess, lapNum, 4, sectorFilter);
+    const out = [];
+    let t0 = null;
+    for (const p of pts) {
+      if (p.t == null || !isFinite(p.t)) continue;
+      if (t0 === null) t0 = p.t;
+      const t = p.t - t0;
+      // タイムスタンプ逆行（GPS 補正等）はスキップ
+      if (out.length > 0 && t <= out[out.length - 1].t) continue;
+      out.push({ lat: p.lat, lon: p.lon, t, v: p.v });
+    }
+    return out;
+  }
+
+  // 同コース全セッション中のベストラップ（= Best Record）を検索
+  function findBestRecord(s) {
+    const sessions = loadSessions();
+    let best = null;
+    sessions
+      .filter(x => x.courseName === s.courseName)
+      .forEach(sess => {
+        sess.laps.forEach(lap => {
+          if (best === null || lap.totalMs < best.totalMs) {
+            best = { session: sess, lapNumber: lap.number, totalMs: lap.totalMs };
+          }
+        });
+      });
+    if (best) {
+      const d = new Date(best.session.startTime);
+      best.dateLabel = `${d.getMonth() + 1}/${d.getDate()}`;
+      best.isSelf = (best.session.id === s.id);
+    }
+    return best;
+  }
+
+  // 時刻 t(ms) におけるトラック上の補間位置 {lat,lon,v} を返す
+  function posAtTime(track, t) {
+    const n = track.length;
+    if (n === 0) return null;
+    if (t <= track[0].t) return track[0];
+    if (t >= track[n - 1].t) return track[n - 1];
+    // 二分探索: track[lo].t <= t < track[lo+1].t
+    let lo = 0, hi = n - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (track[mid].t <= t) lo = mid; else hi = mid;
+    }
+    const a = track[lo], b = track[lo + 1];
+    const k = (t - a.t) / (b.t - a.t || 1);
+    return {
+      lat: a.lat + (b.lat - a.lat) * k,
+      lon: a.lon + (b.lon - a.lon) * k,
+      v: (a.v != null && b.v != null) ? a.v + (b.v - a.v) * k : (a.v != null ? a.v : b.v),
+    };
+  }
+
+  function clearPlaybackMarkers() {
+    if (analysis.map) {
+      if (playback.marker)      { try { analysis.map.removeLayer(playback.marker); } catch (_) {} }
+      if (playback.ghostMarker) { try { analysis.map.removeLayer(playback.ghostMarker); } catch (_) {} }
+    }
+    playback.marker = null;
+    playback.ghostMarker = null;
+  }
+
+  // トラック再構築（ラップ・区間変更 / マップ再生成 / BEST トグル時）
+  function rebuildPlayback(s) {
+    const wasPlaying = playback.playing;
+    pbPause();
+    clearPlaybackMarkers();
+
+    const lapNum = (analysis.selectedLaps.length > 0) ? analysis.selectedLaps[0] : -1;
+    playback.mainLapNum = lapNum;
+    playback.track = buildTrackPoints(s, lapNum, analysis.selectedSector);
+
+    playback.ghostTrack = [];
+    playback.ghostInfo = null;
+    if (playback.ghostOn) {
+      const best = findBestRecord(s);
+      if (best) {
+        playback.ghostTrack = buildTrackPoints(best.session, best.lapNumber, analysis.selectedSector);
+        playback.ghostInfo = best;
+      }
+    }
+
+    playback.duration = Math.max(
+      playback.track.length     ? playback.track[playback.track.length - 1].t         : 0,
+      playback.ghostTrack.length ? playback.ghostTrack[playback.ghostTrack.length - 1].t : 0
+    );
+    playback.simTime = Math.min(playback.simTime, playback.duration);
+
+    // 再生可能データが無ければバーごと非表示
+    const bar = document.getElementById('playback-bar');
+    if (bar) bar.style.display = (playback.track.length >= 2) ? '' : 'none';
+
+    renderPlaybackFrame();
+    if (wasPlaying && playback.duration > 0 && playback.simTime < playback.duration) pbPlay();
+  }
+
+  // 現在の simTime に応じてドット位置 + UI を更新
+  function renderPlaybackFrame() {
+    const curEl = document.getElementById('pb-cur');
+    const totEl = document.getElementById('pb-total');
+    const seekEl = document.getElementById('pb-seek');
+    const infoEl = document.getElementById('pb-info');
+    if (curEl) curEl.textContent = fmtPlayClock(playback.simTime);
+    if (totEl) totEl.textContent = fmtPlayClock(playback.duration);
+    if (seekEl && playback.duration > 0 && !playback.seeking) {
+      seekEl.value = String(Math.round(playback.simTime / playback.duration * 1000));
+    }
+
+    const infoParts = [];
+
+    if (analysis.map && playback.track.length >= 2) {
+      const p = posAtTime(playback.track, playback.simTime);
+      if (p) {
+        if (!playback.marker) {
+          playback.marker = L.circleMarker([p.lat, p.lon], {
+            radius: 8, color: '#fff', weight: 2,
+            fillColor: '#00d4ff', fillOpacity: 1,
+          }).addTo(analysis.map);
+        } else {
+          playback.marker.setLatLng([p.lat, p.lon]);
+        }
+        const lapLabel = (playback.mainLapNum === -1) ? '全データ' : `L${playback.mainLapNum}`;
+        infoParts.push(`<span class="pb-dot-main">●</span> ${lapLabel} ${p.v != null ? p.v.toFixed(1) + ' km/h' : '--'}`);
+      }
+    }
+
+    if (analysis.map && playback.ghostOn && playback.ghostTrack.length >= 2) {
+      const g = posAtTime(playback.ghostTrack, playback.simTime);
+      if (g) {
+        if (!playback.ghostMarker) {
+          playback.ghostMarker = L.circleMarker([g.lat, g.lon], {
+            radius: 8, color: '#fff', weight: 2,
+            fillColor: '#ffb000', fillOpacity: 0.92,
+          }).addTo(analysis.map);
+        } else {
+          playback.ghostMarker.setLatLng([g.lat, g.lon]);
+        }
+        const bi = playback.ghostInfo;
+        const label = bi
+          ? `BEST ${formatTime(bi.totalMs)} (${bi.dateLabel}${bi.isSelf ? '・本走行' : ''})`
+          : 'BEST';
+        infoParts.push(`<span class="pb-dot-ghost">●</span> ${label} ${g.v != null ? g.v.toFixed(1) + ' km/h' : '--'}`);
+      }
+    }
+
+    if (infoEl) infoEl.innerHTML = infoParts.join('<span style="color:var(--fg-faint)">｜</span>');
+  }
+
+  // ── 再生ループ（requestAnimationFrame）────────────
+  function pbTick(ts) {
+    if (!playback.playing) return;
+    const dt = ts - playback.lastTs;
+    playback.lastTs = ts;
+    playback.simTime += dt * playback.speed;
+    if (playback.simTime >= playback.duration) {
+      playback.simTime = playback.duration;
+      pbPause();   // 終端で自動停止（位置は終端のまま）
+    }
+    renderPlaybackFrame();
+    if (playback.playing) playback.raf = requestAnimationFrame(pbTick);
+  }
+
+  function pbPlay() {
+    if (playback.duration <= 0 || playback.track.length < 2) return;
+    // 終端から再生 → 先頭に巻き戻してリスタート
+    if (playback.simTime >= playback.duration) playback.simTime = 0;
+    playback.playing = true;
+    playback.lastTs = performance.now();
+    const btn = document.getElementById('pb-play');
+    if (btn) btn.textContent = '❚❚';
+    playback.raf = requestAnimationFrame(pbTick);
+  }
+
+  function pbPause() {
+    playback.playing = false;
+    if (playback.raf) { cancelAnimationFrame(playback.raf); playback.raf = null; }
+    const btn = document.getElementById('pb-play');
+    if (btn) btn.textContent = '▶';
+  }
+
+  function pbStop() {
+    pbPause();
+    playback.simTime = 0;
+    renderPlaybackFrame();
+  }
+
+  // セッション画面を開いた時の初期化（openSessionDetail から呼ぶ）
+  function resetPlaybackForSession() {
+    pbPause();
+    clearPlaybackMarkers();
+    playback.simTime = 0;
+    playback.track = [];
+    playback.ghostTrack = [];
+    playback.ghostInfo = null;
+    playback.duration = 0;
+    // ghostOn / speed はユーザー設定としてセッション間で維持
+    const bar = document.getElementById('playback-bar');
+    if (bar) bar.style.display = 'none';   // rebuildPlayback で再表示判定
+    const ghostBtn = document.getElementById('pb-ghost');
+    if (ghostBtn) ghostBtn.classList.toggle('active', playback.ghostOn);
+    renderPlaybackFrame();
+  }
+
+  // ── 再生 UI イベント ──────────────────────────────
+  (function bindPlaybackUI() {
+    const play  = document.getElementById('pb-play');
+    const stop  = document.getElementById('pb-stop');
+    const seek  = document.getElementById('pb-seek');
+    const speed = document.getElementById('pb-speed');
+    const ghost = document.getElementById('pb-ghost');
+    if (!play) return;   // 画面未ロード時ガード
+
+    play.addEventListener('click', () => {
+      if (playback.playing) pbPause();
+      else pbPlay();
+    });
+
+    stop.addEventListener('click', pbStop);
+
+    // シークバー: ドラッグ位置にジャンプ（再生中ならそのまま続行）
+    const seekStart = () => { playback.seeking = true; };
+    const seekEnd   = () => { playback.seeking = false; };
+    seek.addEventListener('pointerdown', seekStart);
+    seek.addEventListener('pointerup', seekEnd);
+    seek.addEventListener('pointercancel', seekEnd);
+    seek.addEventListener('touchstart', seekStart, { passive: true });
+    seek.addEventListener('touchend', seekEnd);
+    seek.addEventListener('input', () => {
+      if (playback.duration <= 0) return;
+      playback.simTime = (parseInt(seek.value, 10) / 1000) * playback.duration;
+      playback.lastTs = performance.now();   // ジャンプ直後のフレーム飛び防止
+      renderPlaybackFrame();
+    });
+
+    // 再生速度: ×1 → ×2 → ×4 → ×8 → ×0.5 → ×1 ...
+    speed.addEventListener('click', () => {
+      const i = playback.speedSteps.indexOf(playback.speed);
+      playback.speed = playback.speedSteps[(i + 1) % playback.speedSteps.length];
+      speed.textContent = '×' + (playback.speed === 0.5 ? '0.5' : playback.speed);
+    });
+
+    // BEST ゴースト比較トグル
+    ghost.addEventListener('click', () => {
+      const s = loadSessions().find(x => x.id === analysis.sessionId);
+      if (!s) return;
+      if (!playback.ghostOn) {
+        const best = findBestRecord(s);
+        if (!best) { toast('このコースのベスト記録がありません'); return; }
+        playback.ghostOn = true;
+        if (best.isSelf && best.lapNumber === playback.mainLapNum) {
+          toast('再生中のラップがベスト記録です');
+        }
+      } else {
+        playback.ghostOn = false;
+      }
+      ghost.classList.toggle('active', playback.ghostOn);
+      rebuildPlayback(s);
+    });
+  })();
+
   // ── ラップタイム一覧（選択中ラップ強調 + 色マーカー）─────
   function renderSessionLapList(s) {
     const listEl = document.getElementById('session-lap-list');
@@ -1640,6 +1996,10 @@ window.addEventListener('error', function(e) {
   document.getElementById('btn-open-history').addEventListener('click', openHistory);
   document.getElementById('btn-history-back').addEventListener('click', () => showScreen('home'));
   document.getElementById('btn-session-back').addEventListener('click', () => {
+    // 再生シミュレーションを停止
+    pbPause();
+    playback.marker = null;
+    playback.ghostMarker = null;
     // マップリソースを解放
     if (analysis.map) {
       try { analysis.map.remove(); } catch (_) {}

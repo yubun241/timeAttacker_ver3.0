@@ -1342,6 +1342,117 @@ body::before {
 }
 .analysis-map-empty.hidden { display: none; }
 
+/* ── 再生シミュレーションバー（音楽プレイヤー風）── */
+.playback-bar {
+  margin-top: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.pb-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pb-btn {
+  flex: 0 0 auto;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 6px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.pb-btn:active { background: var(--bg); }
+.pb-btn.pb-main {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0a0c10;
+  font-weight: 700;
+}
+.pb-btn.pb-speed,
+.pb-btn.pb-ghost {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.pb-btn.pb-ghost.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 6px rgba(255, 176, 0, 0.35) inset;
+}
+.pb-seek {
+  flex: 1 1 auto;
+  min-width: 60px;
+  height: 26px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.pb-seek::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+}
+.pb-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #fff;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
+}
+.pb-seek::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+}
+.pb-seek::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #fff;
+}
+.pb-time {
+  flex: 0 0 auto;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+.pb-time .pb-sep { margin: 0 3px; color: var(--fg-faint); }
+.pb-time #pb-cur { color: var(--fg); }
+.pb-info {
+  margin-top: 6px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--fg-dim);
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  min-height: 14px;
+}
+.pb-info .pb-dot-main { color: #00d4ff; }
+.pb-info .pb-dot-ghost { color: var(--accent); }
+
+/* 狭い画面: 時間表示を折り返し */
+@media (max-width: 430px) {
+  .pb-controls { flex-wrap: wrap; }
+  .pb-seek { order: 10; flex-basis: 100%; }
+}
+
 .analysis-controls {
   background: var(--bg-elev);
   border: 1px solid var(--border);
