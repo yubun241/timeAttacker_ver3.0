@@ -1444,8 +1444,8 @@ body::before {
   flex-wrap: wrap;
   min-height: 14px;
 }
-.pb-info .pb-dot-main { color: #00d4ff; }
-.pb-info .pb-dot-ghost { color: var(--accent); }
+.pb-info .pb-dot-main  { color: #ff3d1a; }
+.pb-info .pb-dot-ghost { color: #4fc3f7; }
 
 /* 狭い画面: 時間表示を折り返し */
 @media (max-width: 430px) {

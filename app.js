@@ -1813,7 +1813,7 @@ window.addEventListener('error', function(e) {
         if (!playback.marker) {
           playback.marker = L.circleMarker([p.lat, p.lon], {
             radius: 8, color: '#fff', weight: 2,
-            fillColor: '#00d4ff', fillOpacity: 1,
+            fillColor: '#ff3d1a', fillOpacity: 1,
           }).addTo(analysis.map);
         } else {
           playback.marker.setLatLng([p.lat, p.lon]);
@@ -1829,7 +1829,7 @@ window.addEventListener('error', function(e) {
         if (!playback.ghostMarker) {
           playback.ghostMarker = L.circleMarker([g.lat, g.lon], {
             radius: 8, color: '#fff', weight: 2,
-            fillColor: '#ffb000', fillOpacity: 0.92,
+            fillColor: '#4fc3f7', fillOpacity: 0.92,
           }).addTo(analysis.map);
         } else {
           playback.ghostMarker.setLatLng([g.lat, g.lon]);
